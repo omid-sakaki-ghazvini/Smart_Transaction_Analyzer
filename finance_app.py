@@ -2,37 +2,13 @@ import streamlit as st
 import pandas as pd
 import duckdb
 from datetime import datetime
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 
-# --- تنظیمات اولیه ---
 st.set_page_config(
     page_title="تحلیلگر هوشمند مالی",
     page_icon="💳",
     layout="wide"
 )
 
-# --- مدل پردازش زبان طبیعی ---
-@st.cache_resource
-def load_nlp_model():
-    try:
-        # برای زبان فارسی، یک مدل مناسب دسته‌بندی متنی فارسی را جایگزین کنید
-        # اگر مدل دسته‌بندی مالی ندارید، از مدل احساسات فارسی به عنوان نمونه استفاده می‌شود
-        model_name = "HooshvareLab/bert-fa-base-uncased-sentiment-snappfood"
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSequenceClassification.from_pretrained(model_name)
-        return pipeline(
-            "text-classification",
-            model=model,
-            tokenizer=tokenizer,
-            device=0 if torch.cuda.is_available() else -1
-        )
-    except Exception as e:
-        st.error(f"خطا در بارگذاری مدل: {str(e)}")
-        return None
-
-nlp_pipe = load_nlp_model()
-
-# --- پایگاه داده ---
 def init_db():
     conn = duckdb.connect(database=':memory:')
     conn.execute("""
@@ -43,7 +19,6 @@ def init_db():
         category VARCHAR(50),
         description TEXT
     )""")
-    # داده‌های نمونه
     sample_data = [
         (1, '2023-01-15', 150000, 'غذا', 'رستوران'),
         (2, '2023-01-20', 250000, 'حمل و نقل', 'تاکسی'),
@@ -56,7 +31,6 @@ def init_db():
 if 'db' not in st.session_state:
     st.session_state.db = init_db()
 
-# --- توابع اصلی ---
 def add_transaction(date, amount, category, description):
     try:
         st.session_state.db.execute("""
@@ -69,38 +43,9 @@ def add_transaction(date, amount, category, description):
         st.error(f"خطا: {str(e)}")
         return False
 
-def natural_language_to_sql(query):
-    """
-    تبدیل پرسش طبیعی به کوئری SQL با استفاده از الگوهای ساده.
-    برای راهکار کامل، می‌توانید مدل فارسی NL2SQL اضافه کنید یا این تابع را گسترش دهید.
-    """
-    try:
-        q = query.strip().lower()
-        if "کل" in q and ("هزینه" in q or "خرج" in q or "مجموع" in q):
-            sql = "SELECT SUM(amount) AS total FROM transactions"
-        elif "غذا" in q:
-            sql = "SELECT SUM(amount) AS food_total FROM transactions WHERE category='غذا'"
-        elif "جدید" in q or "اخیر" in q or "آخر" in q:
-            sql = "SELECT * FROM transactions ORDER BY date DESC LIMIT 5"
-        elif "دسته" in q or "توزیع" in q:
-            sql = """
-            SELECT category, SUM(amount) AS total 
-            FROM transactions 
-            GROUP BY category 
-            ORDER BY total DESC
-            """
-        else:
-            # پیش‌فرض: نمایش همه تراکنش‌ها
-            sql = "SELECT * FROM transactions ORDER BY date DESC LIMIT 10"
-        df = st.session_state.db.execute(sql).fetchdf()
-        return df, sql
-    except Exception as e:
-        return None, f"خطا: {str(e)}"
-
-# --- رابط کاربری ---
 st.title("💳 تحلیلگر هوشمند مالی")
 
-tab1, tab2, tab3 = st.tabs(["ثبت تراکنش", "تحلیل سنتی", "پرس‌وجوی هوشمند"])
+tab1, tab2 = st.tabs(["ثبت تراکنش", "تحلیل"])
 
 with tab1:
     st.header("ثبت تراکنش جدید")
@@ -121,7 +66,7 @@ with tab1:
                 st.success("تراکنش با موفقیت ثبت شد.")
 
 with tab2:
-    st.header("تحلیل سنتی")
+    st.header("تحلیل تراکنش‌ها")
     analysis_type = st.selectbox(
         "نوع تحلیل",
         ["کل هزینه‌ها", "توزیع هزینه‌ها", "تراکنش‌های اخیر"]
@@ -145,24 +90,3 @@ with tab2:
     elif analysis_type == "تراکنش‌های اخیر":
         df = st.session_state.db.execute("SELECT * FROM transactions ORDER BY date DESC LIMIT 10").fetchdf()
         st.dataframe(df, hide_index=True)
-
-with tab3:
-    st.header("پرس‌وجوی هوشمند")
-    st.markdown("""
-    **نمونه پرسش‌ها:**
-    - کل هزینه‌های من چقدر است؟
-    - هزینه غذاهای من چقدر شده؟
-    - تراکنش‌های اخیر من را نشان بده
-    - توزیع هزینه‌های من بر اساس دسته‌بندی چگونه است؟
-    """)
-    user_query = st.text_input("سوال خود را به زبان فارسی وارد کنید:")
-    if st.button("اجرای پرس‌وجو") and user_query:
-        with st.spinner("در حال پردازش سوال..."):
-            result, sql = natural_language_to_sql(user_query)
-            if result is not None:
-                st.success("نتایج:")
-                st.dataframe(result)
-                with st.expander("مشاهده کد SQL"):
-                    st.code(sql, language='sql')
-            else:
-                st.error(sql)
