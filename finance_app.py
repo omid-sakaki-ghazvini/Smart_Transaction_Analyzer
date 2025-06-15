@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import duckdb
 from datetime import datetime
-from transformers import pipeline
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 import torch
 
 # تنظیمات اولیه
@@ -16,11 +16,15 @@ st.set_page_config(
 @st.cache_resource
 def load_nlp_model():
     try:
+        model_name = "HooshvareLab/bert-fa-base-uncased"
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        
         return pipeline(
-            "text-generation",
-            model="HooshvareLab/bert-fa-base-uncased",
-            torch_dtype=torch.float16,
-            device_map="auto"
+            "text-classification",
+            model=model,
+            tokenizer=tokenizer,
+            device=0 if torch.cuda.is_available() else -1
         )
     except Exception as e:
         st.error(f"خطا در بارگذاری مدل: {str(e)}")
@@ -69,24 +73,32 @@ def add_transaction(date, amount, category, description):
         return False
 
 def natural_language_to_sql(query):
-    """تبدیل پرس‌وجوی طبیعی به SQL"""
+    """تبدیل پرس‌وجوی طبیعی به SQL با استفاده از الگوهای از پیش تعریف شده"""
     try:
-        prompt = f"""
-        شما یک مترجم پرس‌وجوی مالی به SQL هستید.
-        جدول transactions دارای ستون‌های: id, date, amount, category, description
+        # دیکشنری الگوهای پرس‌وجو
+        patterns = {
+            "کل هزینه": "SELECT SUM(amount) AS total FROM transactions",
+            "هزینه غذا": "SELECT SUM(amount) AS food_total FROM transactions WHERE category='غذا'",
+            "تراکنش اخیر": "SELECT * FROM transactions ORDER BY date DESC LIMIT 5",
+            "دسته بندی هزینه": """
+            SELECT category, SUM(amount) AS total 
+            FROM transactions 
+            GROUP BY category 
+            ORDER BY total DESC
+            """
+        }
         
-        این پرس‌وجو را به SQL تبدیل کن: {query}
+        # تشخیص الگوی مناسب با مدل
+        result = nlp_pipe(query)
+        predicted_label = result[0]['label']
         
-        فقط کد SQL را برگردان بدون هیچ توضیحی.
-        """
-        
-        # تولید SQL
-        generated = nlp_pipe(prompt, max_length=200)
-        sql = generated[0]['generated_text'].strip()
+        # انتخاب کوئری مناسب
+        sql = patterns.get(predicted_label, patterns["کل هزینه"])
         
         # اجرای کوئری
-        result = st.session_state.db.execute(sql).fetchdf()
-        return result, sql
+        df = st.session_state.db.execute(sql).fetchdf()
+        return df, sql
+        
     except Exception as e:
         return None, f"خطا: {str(e)}"
 
@@ -147,9 +159,9 @@ with tab3:
     st.markdown("""
     **نمونه پرس‌وجوها:**
     - کل هزینه‌های من چقدر است؟
-    - پرخرج‌ترین دسته‌بندی کدام است؟
-    - تراکنش‌های بالای ۱ میلیون تومان
-    - مجموع هزینه‌های غذا در ماه گذشته
+    - هزینه غذاهای من چقدر شده؟
+    - تراکنش‌های اخیر من را نشان بده
+    - دسته‌بندی هزینه‌های من چگونه است؟
     """)
     
     user_query = st.text_input("سوال خود را به زبان فارسی وارد کنید:")
