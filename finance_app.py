@@ -8,7 +8,7 @@ import torch
 # تنظیمات اولیه
 st.set_page_config(
     page_title="دستیار هوشمند مالی ",
-    text="omidsakaki.ir"
+    page_title="omidsakaki.ir"
     page_icon="💳",
     layout="wide"
 )
