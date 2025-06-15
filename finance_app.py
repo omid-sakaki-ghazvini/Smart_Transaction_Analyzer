@@ -43,9 +43,37 @@ def add_transaction(date, amount, category, description):
         st.error(f"خطا: {str(e)}")
         return False
 
+def natural_language_to_sql(query):
+    """
+    تبدیل پرسش طبیعی به کوئری SQL با استفاده از الگوهای ساده.
+    برای راهکار کامل، می‌توانید مدل فارسی NL2SQL اضافه کنید یا این تابع را گسترش دهید.
+    """
+    try:
+        q = query.strip().lower()
+        if "کل" in q and ("هزینه" in q or "خرج" in q or "مجموع" in q):
+            sql = "SELECT SUM(amount) AS total FROM transactions"
+        elif "غذا" in q:
+            sql = "SELECT SUM(amount) AS food_total FROM transactions WHERE category='غذا'"
+        elif "جدید" in q or "اخیر" in q or "آخر" in q:
+            sql = "SELECT * FROM transactions ORDER BY date DESC LIMIT 5"
+        elif "دسته" in q or "توزیع" in q:
+            sql = """
+            SELECT category, SUM(amount) AS total 
+            FROM transactions 
+            GROUP BY category 
+            ORDER BY total DESC
+            """
+        else:
+            # پیش‌فرض: نمایش همه تراکنش‌ها
+            sql = "SELECT * FROM transactions ORDER BY date DESC LIMIT 10"
+        df = st.session_state.db.execute(sql).fetchdf()
+        return df, sql
+    except Exception as e:
+        return None, f"خطا: {str(e)}"
+
 st.title("💳 تحلیلگر هوشمند مالی")
 
-tab1, tab2 = st.tabs(["ثبت تراکنش", "تحلیل"])
+tab1, tab2, tab3 = st.tabs(["ثبت تراکنش", "تحلیل سنتی", "پرس‌وجوی هوشمند"])
 
 with tab1:
     st.header("ثبت تراکنش جدید")
@@ -66,7 +94,7 @@ with tab1:
                 st.success("تراکنش با موفقیت ثبت شد.")
 
 with tab2:
-    st.header("تحلیل تراکنش‌ها")
+    st.header("تحلیل سنتی")
     analysis_type = st.selectbox(
         "نوع تحلیل",
         ["کل هزینه‌ها", "توزیع هزینه‌ها", "تراکنش‌های اخیر"]
@@ -90,3 +118,24 @@ with tab2:
     elif analysis_type == "تراکنش‌های اخیر":
         df = st.session_state.db.execute("SELECT * FROM transactions ORDER BY date DESC LIMIT 10").fetchdf()
         st.dataframe(df, hide_index=True)
+
+with tab3:
+    st.header("پرس‌وجوی هوشمند")
+    st.markdown("""
+    **نمونه پرسش‌ها:**
+    - کل هزینه‌های من چقدر است؟
+    - هزینه غذاهای من چقدر شده؟
+    - تراکنش‌های اخیر من را نشان بده
+    - توزیع هزینه‌های من بر اساس دسته‌بندی چگونه است؟
+    """)
+    user_query = st.text_input("سوال خود را به زبان فارسی وارد کنید:")
+    if st.button("اجرای پرس‌وجو") and user_query:
+        with st.spinner("در حال پردازش سوال..."):
+            result, sql = natural_language_to_sql(user_query)
+            if result is not None:
+                st.success("نتایج:")
+                st.dataframe(result)
+                with st.expander("مشاهده کد SQL"):
+                    st.code(sql, language='sql')
+            else:
+                st.error(sql)
