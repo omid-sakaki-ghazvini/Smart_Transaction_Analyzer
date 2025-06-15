@@ -5,18 +5,19 @@ from datetime import datetime
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 import torch
 
-# تنظیمات اولیه
+# --- Initial settings ---
 st.set_page_config(
-    page_title="تحلیلگر مالی هوشمند",
+    page_title="Smart Financial Analyzer",
     page_icon="💳",
     layout="wide"
 )
 
-# --- مدل پردازش زبان طبیعی ---
+# --- NLP Model ---
 @st.cache_resource
 def load_nlp_model():
     try:
-        # مدل مناسب دسته‌بندی متنی فارسی (در صورت نیاز مدل بهتری جایگزین کنید)
+        # A text classification model that is fine-tuned for sentiment (as an example)
+        # You can replace with a more appropriate model for financial queries if available.
         model_name = "HooshvareLab/bert-fa-base-uncased-sentiment-snappfood"
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForSequenceClassification.from_pretrained(model_name)
@@ -27,12 +28,12 @@ def load_nlp_model():
             device=0 if torch.cuda.is_available() else -1
         )
     except Exception as e:
-        st.error(f"خطا در بارگذاری مدل: {str(e)}")
+        st.error(f"Error loading model: {str(e)}")
         return None
 
 nlp_pipe = load_nlp_model()
 
-# --- پایگاه داده ---
+# --- Database ---
 def init_db():
     conn = duckdb.connect(database=':memory:')
     conn.execute("""
@@ -43,11 +44,11 @@ def init_db():
         category VARCHAR(50),
         description TEXT
     )""")
-    # داده‌های نمونه
+    # Sample data
     sample_data = [
-        (1, '2023-01-15', 150000, 'غذا', 'رستوران'),
-        (2, '2023-01-20', 250000, 'حمل و نقل', 'تاکسی'),
-        (3, '2023-02-05', 3000000, 'مسکن', 'اجاره')
+        (1, '2023-01-15', 150000, 'Food', 'Restaurant'),
+        (2, '2023-01-20', 250000, 'Transport', 'Taxi'),
+        (3, '2023-02-05', 3000000, 'Housing', 'Rent')
     ]
     for data in sample_data:
         conn.execute("INSERT OR IGNORE INTO transactions VALUES (?, ?, ?, ?, ?)", data)
@@ -56,7 +57,7 @@ def init_db():
 if 'db' not in st.session_state:
     st.session_state.db = init_db()
 
-# --- توابع اصلی ---
+# --- Main functions ---
 def add_transaction(date, amount, category, description):
     try:
         st.session_state.db.execute("""
@@ -66,96 +67,101 @@ def add_transaction(date, amount, category, description):
         )""", [str(date), float(amount), category, description])
         return True
     except Exception as e:
-        st.error(f"خطا: {str(e)}")
+        st.error(f"Error: {str(e)}")
         return False
 
 def natural_language_to_sql(query):
-    """تبدیل پرس‌وجوی طبیعی به SQL با استفاده از الگوهای از پیش تعریف شده"""
+    """Convert natural language query to SQL using predefined patterns"""
     try:
-        # الگوها را بر اساس برچسب‌های مدل بالا تنظیم کنید
-        # LABEL_0: مثبت (به عنوان مثال کل هزینه)
-        # LABEL_1: منفی (به عنوان مثال هزینه غذا)
-        # LABEL_2: خنثی (به عنوان مثال تراکنش اخیر)
+        # Patterns dictionary - adjust keys to model's labels
+        # LABEL_0: positive, LABEL_1: negative, LABEL_2: neutral (example mapping)
         patterns = {
-            "LABEL_0": "SELECT SUM(amount) AS total FROM transactions", # کل هزینه
-            "LABEL_1": "SELECT SUM(amount) AS food_total FROM transactions WHERE category='غذا'", # هزینه غذا
-            "LABEL_2": "SELECT * FROM transactions ORDER BY date DESC LIMIT 5", # تراکنش اخیر
-            # اگر مدل برچسب دیگری دارد می‌توانید اضافه کنید
+            "LABEL_0": "SELECT SUM(amount) AS total FROM transactions", # total expenses
+            "LABEL_1": "SELECT SUM(amount) AS food_total FROM transactions WHERE category='Food'", # food expenses
+            "LABEL_2": "SELECT * FROM transactions ORDER BY date DESC LIMIT 5", # recent transactions
+            "LABEL_3": """
+            SELECT category, SUM(amount) AS total 
+            FROM transactions 
+            GROUP BY category 
+            ORDER BY total DESC
+            """ # expense by category
         }
+        if not nlp_pipe:
+            raise Exception("NLP model not loaded.")
         result = nlp_pipe(query)
         predicted_label = result[0]['label']
         sql = patterns.get(predicted_label, patterns["LABEL_0"])
         df = st.session_state.db.execute(sql).fetchdf()
         return df, sql
     except Exception as e:
-        return None, f"خطا: {str(e)}"
+        return None, f"Error: {str(e)}"
 
-# --- رابط کاربری ---
-st.title("💳 تحلیلگر هوشمند مالی")
+# --- User Interface ---
+st.title("💳 Smart Financial Analyzer")
 
-tab1, tab2, tab3 = st.tabs(["ثبت تراکنش", "تحلیل سنتی", "پرس‌وجوی هوشمند"])
+tab1, tab2, tab3 = st.tabs(["Add Transaction", "Traditional Analysis", "Smart Query"])
 
 with tab1:
-    st.header("ثبت تراکنش جدید")
+    st.header("Add a New Transaction")
     with st.form("transaction_form"):
         col1, col2 = st.columns(2)
         with col1:
-            date = st.date_input("تاریخ", datetime.now())
-            amount = st.number_input("مبلغ (ریال)", min_value=1000, step=1000)
+            date = st.date_input("Date", datetime.now())
+            amount = st.number_input("Amount (Rial)", min_value=1000, step=1000)
         with col2:
             category = st.selectbox(
-                "دسته‌بندی",
-                ["غذا", "حمل و نقل", "مسکن", "تفریح", "خرید", "سایر"]
+                "Category",
+                ["Food", "Transport", "Housing", "Fun", "Shopping", "Other"]
             )
-            description = st.text_input("توضیحات (اختیاری)")
-        submitted = st.form_submit_button("ثبت تراکنش")
+            description = st.text_input("Description (optional)")
+        submitted = st.form_submit_button("Add Transaction")
         if submitted:
             if add_transaction(date, amount, category, description):
-                st.success("تراکنش با موفقیت ثبت شد")
+                st.success("Transaction added successfully.")
 
 with tab2:
-    st.header("تحلیل سنتی")
+    st.header("Traditional Analysis")
     analysis_type = st.selectbox(
-        "نوع تحلیل",
-        ["کل هزینه‌ها", "توزیع هزینه‌ها", "تراکنش‌های اخیر"]
+        "Analysis Type",
+        ["Total Expenses", "Expense Distribution", "Recent Transactions"]
     )
 
-    if analysis_type == "کل هزینه‌ها":
-        df = st.session_state.db.execute("SELECT SUM(amount) AS 'مجموع هزینه‌ها' FROM transactions").fetchdf()
+    if analysis_type == "Total Expenses":
+        df = st.session_state.db.execute("SELECT SUM(amount) AS 'Total Expenses' FROM transactions").fetchdf()
         st.dataframe(df, hide_index=True)
-    elif analysis_type == "توزیع هزینه‌ها":
+    elif analysis_type == "Expense Distribution":
         df = st.session_state.db.execute("""
         SELECT 
-            category AS 'دسته', 
-            SUM(amount) AS 'مبلغ',
-            ROUND(SUM(amount)*100/(SELECT SUM(amount) FROM transactions), 1) AS 'درصد'
+            category AS 'Category', 
+            SUM(amount) AS 'Amount',
+            ROUND(SUM(amount)*100/(SELECT SUM(amount) FROM transactions), 1) AS 'Percent'
         FROM transactions 
         GROUP BY category 
         ORDER BY SUM(amount) DESC
         """).fetchdf()
         st.dataframe(df, hide_index=True)
-        st.bar_chart(df.set_index('دسته')['مبلغ'])
-    elif analysis_type == "تراکنش‌های اخیر":
+        st.bar_chart(df.set_index('Category')['Amount'])
+    elif analysis_type == "Recent Transactions":
         df = st.session_state.db.execute("SELECT * FROM transactions ORDER BY date DESC LIMIT 10").fetchdf()
         st.dataframe(df, hide_index=True)
 
 with tab3:
-    st.header("پرس‌وجوی هوشمند")
+    st.header("Smart Query")
     st.markdown("""
-    **نمونه پرس‌وجوها:**
-    - کل هزینه‌های من چقدر است؟
-    - هزینه غذاهای من چقدر شده؟
-    - تراکنش‌های اخیر من را نشان بده
-    - دسته‌بندی هزینه‌های من چگونه است؟
+    **Sample queries:**
+    - What is my total expense?
+    - How much did I spend on food?
+    - Show my recent transactions
+    - How is my expense distribution?
     """)
-    user_query = st.text_input("سوال خود را به زبان فارسی وارد کنید:")
-    if st.button("اجرای پرس‌وجو") and user_query:
-        with st.spinner("در حال پردازش سوال..."):
+    user_query = st.text_input("Enter your question in English or Persian:")
+    if st.button("Run Query") and user_query:
+        with st.spinner("Processing your question..."):
             result, sql = natural_language_to_sql(user_query)
             if result is not None:
-                st.success("نتایج:")
+                st.success("Results:")
                 st.dataframe(result)
-                with st.expander("مشاهده کوئری SQL"):
+                with st.expander("Show SQL Query"):
                     st.code(sql, language='sql')
             else:
                 st.error(sql)
