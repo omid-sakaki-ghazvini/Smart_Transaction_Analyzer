@@ -233,7 +233,7 @@ with tab2:
         st.dataframe(df, hide_index=True)
 
 with tab3:
-    st.header("پرس‌وجوی هوشمند (NLP)")
+    st.header("(پردازش زبان طبیعی) پرس‌وجوی هوشمند")
     
     user_query = st.text_input("سوال خود را به زبان فارسی وارد کنید:", key="query_input")
     
