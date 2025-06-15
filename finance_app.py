@@ -2,13 +2,37 @@ import streamlit as st
 import pandas as pd
 import duckdb
 from datetime import datetime
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
+import torch
 
+# تنظیمات اولیه
 st.set_page_config(
-    page_title="تحلیلگر هوشمند مالی",
+    page_title="تحلیلگر مالی هوشمند",
     page_icon="💳",
     layout="wide"
 )
 
+# --- مدل پردازش زبان طبیعی ---
+@st.cache_resource
+def load_nlp_model():
+    try:
+        model_name = "HooshvareLab/bert-fa-base-uncased"
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        
+        return pipeline(
+            "text-classification",
+            model=model,
+            tokenizer=tokenizer,
+            device=0 if torch.cuda.is_available() else -1
+        )
+    except Exception as e:
+        st.error(f"خطا در بارگذاری مدل: {str(e)}")
+        return None
+
+nlp_pipe = load_nlp_model()
+
+# --- پایگاه داده ---
 def init_db():
     conn = duckdb.connect(database=':memory:')
     conn.execute("""
@@ -19,18 +43,23 @@ def init_db():
         category VARCHAR(50),
         description TEXT
     )""")
+    
+    # داده‌های نمونه
     sample_data = [
         (1, '2023-01-15', 150000, 'غذا', 'رستوران'),
         (2, '2023-01-20', 250000, 'حمل و نقل', 'تاکسی'),
         (3, '2023-02-05', 3000000, 'مسکن', 'اجاره')
     ]
+    
     for data in sample_data:
         conn.execute("INSERT OR IGNORE INTO transactions VALUES (?, ?, ?, ?, ?)", data)
+    
     return conn
 
 if 'db' not in st.session_state:
     st.session_state.db = init_db()
 
+# --- توابع اصلی ---
 def add_transaction(date, amount, category, description):
     try:
         st.session_state.db.execute("""
@@ -44,33 +73,36 @@ def add_transaction(date, amount, category, description):
         return False
 
 def natural_language_to_sql(query):
-    """
-    تبدیل پرسش طبیعی به کوئری SQL با استفاده از الگوهای ساده.
-    برای راهکار کامل، می‌توانید مدل فارسی NL2SQL اضافه کنید یا این تابع را گسترش دهید.
-    """
+    """تبدیل پرس‌وجوی طبیعی به SQL با استفاده از الگوهای از پیش تعریف شده"""
     try:
-        q = query.strip().lower()
-        if "کل" in q and ("هزینه" in q or "خرج" in q or "مجموع" in q):
-            sql = "SELECT SUM(amount) AS total FROM transactions"
-        elif "غذا" in q:
-            sql = "SELECT SUM(amount) AS food_total FROM transactions WHERE category='غذا'"
-        elif "جدید" in q or "اخیر" in q or "آخر" in q:
-            sql = "SELECT * FROM transactions ORDER BY date DESC LIMIT 5"
-        elif "دسته" in q or "توزیع" in q:
-            sql = """
+        # دیکشنری الگوهای پرس‌وجو
+        patterns = {
+            "کل هزینه": "SELECT SUM(amount) AS total FROM transactions",
+            "هزینه غذا": "SELECT SUM(amount) AS food_total FROM transactions WHERE category='غذا'",
+            "تراکنش اخیر": "SELECT * FROM transactions ORDER BY date DESC LIMIT 5",
+            "دسته بندی هزینه": """
             SELECT category, SUM(amount) AS total 
             FROM transactions 
             GROUP BY category 
             ORDER BY total DESC
             """
-        else:
-            # پیش‌فرض: نمایش همه تراکنش‌ها
-            sql = "SELECT * FROM transactions ORDER BY date DESC LIMIT 10"
+        }
+        
+        # تشخیص الگوی مناسب با مدل
+        result = nlp_pipe(query)
+        predicted_label = result[0]['label']
+        
+        # انتخاب کوئری مناسب
+        sql = patterns.get(predicted_label, patterns["کل هزینه"])
+        
+        # اجرای کوئری
         df = st.session_state.db.execute(sql).fetchdf()
         return df, sql
+        
     except Exception as e:
         return None, f"خطا: {str(e)}"
 
+# --- رابط کاربری ---
 st.title("💳 تحلیلگر هوشمند مالی")
 
 tab1, tab2, tab3 = st.tabs(["ثبت تراکنش", "تحلیل سنتی", "پرس‌وجوی هوشمند"])
@@ -88,10 +120,11 @@ with tab1:
                 ["غذا", "حمل و نقل", "مسکن", "تفریح", "خرید", "سایر"]
             )
             description = st.text_input("توضیحات (اختیاری)")
+        
         submitted = st.form_submit_button("ثبت تراکنش")
         if submitted:
             if add_transaction(date, amount, category, description):
-                st.success("تراکنش با موفقیت ثبت شد.")
+                st.success("تراکنش با موفقیت ثبت شد")
 
 with tab2:
     st.header("تحلیل سنتی")
@@ -99,10 +132,11 @@ with tab2:
         "نوع تحلیل",
         ["کل هزینه‌ها", "توزیع هزینه‌ها", "تراکنش‌های اخیر"]
     )
-
+    
     if analysis_type == "کل هزینه‌ها":
         df = st.session_state.db.execute("SELECT SUM(amount) AS 'مجموع هزینه‌ها' FROM transactions").fetchdf()
         st.dataframe(df, hide_index=True)
+        
     elif analysis_type == "توزیع هزینه‌ها":
         df = st.session_state.db.execute("""
         SELECT 
@@ -115,6 +149,7 @@ with tab2:
         """).fetchdf()
         st.dataframe(df, hide_index=True)
         st.bar_chart(df.set_index('دسته')['مبلغ'])
+        
     elif analysis_type == "تراکنش‌های اخیر":
         df = st.session_state.db.execute("SELECT * FROM transactions ORDER BY date DESC LIMIT 10").fetchdf()
         st.dataframe(df, hide_index=True)
@@ -122,20 +157,24 @@ with tab2:
 with tab3:
     st.header("پرس‌وجوی هوشمند")
     st.markdown("""
-    **نمونه پرسش‌ها:**
+    **نمونه پرس‌وجوها:**
     - کل هزینه‌های من چقدر است؟
     - هزینه غذاهای من چقدر شده؟
     - تراکنش‌های اخیر من را نشان بده
-    - توزیع هزینه‌های من بر اساس دسته‌بندی چگونه است؟
+    - دسته‌بندی هزینه‌های من چگونه است؟
     """)
+    
     user_query = st.text_input("سوال خود را به زبان فارسی وارد کنید:")
+    
     if st.button("اجرای پرس‌وجو") and user_query:
         with st.spinner("در حال پردازش سوال..."):
             result, sql = natural_language_to_sql(user_query)
+            
             if result is not None:
                 st.success("نتایج:")
                 st.dataframe(result)
-                with st.expander("مشاهده کد SQL"):
+                
+                with st.expander("مشاهده کوئری SQL"):
                     st.code(sql, language='sql')
             else:
                 st.error(sql)
