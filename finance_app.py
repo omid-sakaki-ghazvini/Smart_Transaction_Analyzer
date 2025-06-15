@@ -3,7 +3,6 @@ import pandas as pd
 import duckdb
 from datetime import datetime
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
-import torch
 
 # --- تنظیمات اولیه ---
 st.set_page_config(
