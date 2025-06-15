@@ -16,7 +16,7 @@ st.set_page_config(
 @st.cache_resource
 def load_nlp_model():
     try:
-        # یک مدل که برای دسته‌بندی متنی فارسی Fine-tuned شده انتخاب کنید:
+        # مدل مناسب دسته‌بندی متنی فارسی (در صورت نیاز مدل بهتری جایگزین کنید)
         model_name = "HooshvareLab/bert-fa-base-uncased-sentiment-snappfood"
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForSequenceClassification.from_pretrained(model_name)
@@ -72,17 +72,15 @@ def add_transaction(date, amount, category, description):
 def natural_language_to_sql(query):
     """تبدیل پرس‌وجوی طبیعی به SQL با استفاده از الگوهای از پیش تعریف شده"""
     try:
-        # دیکشنری الگوهای پرس‌وجو - باید بر اساس برچسب‌های مدل تنظیم شود
+        # الگوها را بر اساس برچسب‌های مدل بالا تنظیم کنید
+        # LABEL_0: مثبت (به عنوان مثال کل هزینه)
+        # LABEL_1: منفی (به عنوان مثال هزینه غذا)
+        # LABEL_2: خنثی (به عنوان مثال تراکنش اخیر)
         patterns = {
             "LABEL_0": "SELECT SUM(amount) AS total FROM transactions", # کل هزینه
             "LABEL_1": "SELECT SUM(amount) AS food_total FROM transactions WHERE category='غذا'", # هزینه غذا
             "LABEL_2": "SELECT * FROM transactions ORDER BY date DESC LIMIT 5", # تراکنش اخیر
-            "LABEL_3": """
-            SELECT category, SUM(amount) AS total 
-            FROM transactions 
-            GROUP BY category 
-            ORDER BY total DESC
-            """ # دسته‌بندی هزینه
+            # اگر مدل برچسب دیگری دارد می‌توانید اضافه کنید
         }
         result = nlp_pipe(query)
         predicted_label = result[0]['label']
