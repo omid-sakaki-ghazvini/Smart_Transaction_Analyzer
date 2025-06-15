@@ -16,10 +16,10 @@ st.set_page_config(
 @st.cache_resource
 def load_nlp_model():
     try:
-        model_name = "HooshvareLab/bert-fa-base-uncased"
+        # یک مدل که برای دسته‌بندی متنی فارسی Fine-tuned شده انتخاب کنید:
+        model_name = "HooshvareLab/bert-fa-base-uncased-sentiment-snappfood"
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForSequenceClassification.from_pretrained(model_name)
-        
         return pipeline(
             "text-classification",
             model=model,
@@ -43,17 +43,14 @@ def init_db():
         category VARCHAR(50),
         description TEXT
     )""")
-    
     # داده‌های نمونه
     sample_data = [
         (1, '2023-01-15', 150000, 'غذا', 'رستوران'),
         (2, '2023-01-20', 250000, 'حمل و نقل', 'تاکسی'),
         (3, '2023-02-05', 3000000, 'مسکن', 'اجاره')
     ]
-    
     for data in sample_data:
         conn.execute("INSERT OR IGNORE INTO transactions VALUES (?, ?, ?, ?, ?)", data)
-    
     return conn
 
 if 'db' not in st.session_state:
@@ -75,30 +72,23 @@ def add_transaction(date, amount, category, description):
 def natural_language_to_sql(query):
     """تبدیل پرس‌وجوی طبیعی به SQL با استفاده از الگوهای از پیش تعریف شده"""
     try:
-        # دیکشنری الگوهای پرس‌وجو
+        # دیکشنری الگوهای پرس‌وجو - باید بر اساس برچسب‌های مدل تنظیم شود
         patterns = {
-            "کل هزینه": "SELECT SUM(amount) AS total FROM transactions",
-            "هزینه غذا": "SELECT SUM(amount) AS food_total FROM transactions WHERE category='غذا'",
-            "تراکنش اخیر": "SELECT * FROM transactions ORDER BY date DESC LIMIT 5",
-            "دسته بندی هزینه": """
+            "LABEL_0": "SELECT SUM(amount) AS total FROM transactions", # کل هزینه
+            "LABEL_1": "SELECT SUM(amount) AS food_total FROM transactions WHERE category='غذا'", # هزینه غذا
+            "LABEL_2": "SELECT * FROM transactions ORDER BY date DESC LIMIT 5", # تراکنش اخیر
+            "LABEL_3": """
             SELECT category, SUM(amount) AS total 
             FROM transactions 
             GROUP BY category 
             ORDER BY total DESC
-            """
+            """ # دسته‌بندی هزینه
         }
-        
-        # تشخیص الگوی مناسب با مدل
         result = nlp_pipe(query)
         predicted_label = result[0]['label']
-        
-        # انتخاب کوئری مناسب
-        sql = patterns.get(predicted_label, patterns["کل هزینه"])
-        
-        # اجرای کوئری
+        sql = patterns.get(predicted_label, patterns["LABEL_0"])
         df = st.session_state.db.execute(sql).fetchdf()
         return df, sql
-        
     except Exception as e:
         return None, f"خطا: {str(e)}"
 
@@ -120,7 +110,6 @@ with tab1:
                 ["غذا", "حمل و نقل", "مسکن", "تفریح", "خرید", "سایر"]
             )
             description = st.text_input("توضیحات (اختیاری)")
-        
         submitted = st.form_submit_button("ثبت تراکنش")
         if submitted:
             if add_transaction(date, amount, category, description):
@@ -132,11 +121,10 @@ with tab2:
         "نوع تحلیل",
         ["کل هزینه‌ها", "توزیع هزینه‌ها", "تراکنش‌های اخیر"]
     )
-    
+
     if analysis_type == "کل هزینه‌ها":
         df = st.session_state.db.execute("SELECT SUM(amount) AS 'مجموع هزینه‌ها' FROM transactions").fetchdf()
         st.dataframe(df, hide_index=True)
-        
     elif analysis_type == "توزیع هزینه‌ها":
         df = st.session_state.db.execute("""
         SELECT 
@@ -149,7 +137,6 @@ with tab2:
         """).fetchdf()
         st.dataframe(df, hide_index=True)
         st.bar_chart(df.set_index('دسته')['مبلغ'])
-        
     elif analysis_type == "تراکنش‌های اخیر":
         df = st.session_state.db.execute("SELECT * FROM transactions ORDER BY date DESC LIMIT 10").fetchdf()
         st.dataframe(df, hide_index=True)
@@ -163,17 +150,13 @@ with tab3:
     - تراکنش‌های اخیر من را نشان بده
     - دسته‌بندی هزینه‌های من چگونه است؟
     """)
-    
     user_query = st.text_input("سوال خود را به زبان فارسی وارد کنید:")
-    
     if st.button("اجرای پرس‌وجو") and user_query:
         with st.spinner("در حال پردازش سوال..."):
             result, sql = natural_language_to_sql(user_query)
-            
             if result is not None:
                 st.success("نتایج:")
                 st.dataframe(result)
-                
                 with st.expander("مشاهده کوئری SQL"):
                     st.code(sql, language='sql')
             else:
