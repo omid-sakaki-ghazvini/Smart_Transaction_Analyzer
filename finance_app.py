@@ -249,3 +249,6 @@ with tab3:
                     st.code(sql, language='sql')
             else:
                 st.error(sql)
+
+
+st.markdown("<br><hr><center>Made with ❤️ by <a href='https://omidsakaki.ir/'><strong>omid sakaki ghazvini</strong></a></center><hr>", unsafe_allow_html=True)
