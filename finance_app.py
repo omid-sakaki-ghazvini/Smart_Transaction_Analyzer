@@ -96,10 +96,51 @@ st.title("💳 تحلیلگر هوشمند مالی")
 tab1, tab2, tab3 = st.tabs(["ثبت تراکنش", "تحلیل سنتی", "پرس‌وجوی هوشمند"])
 
 with tab1:
-    # بخش ثبت تراکنش (مشابه قبل)
+    st.header("ثبت تراکنش جدید")
+    with st.form("transaction_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            date = st.date_input("تاریخ", datetime.now())
+            amount = st.number_input("مبلغ (ریال)", min_value=1000, step=1000)
+        with col2:
+            category = st.selectbox(
+                "دسته‌بندی",
+                ["غذا", "حمل و نقل", "مسکن", "تفریح", "خرید", "سایر"]
+            )
+            description = st.text_input("توضیحات (اختیاری)")
+        
+        submitted = st.form_submit_button("ثبت تراکنش")
+        if submitted:
+            if add_transaction(date, amount, category, description):
+                st.success("تراکنش با موفقیت ثبت شد")
 
 with tab2:
-    # بخش تحلیل سنتی (مشابه قبل)
+    st.header("تحلیل سنتی")
+    analysis_type = st.selectbox(
+        "نوع تحلیل",
+        ["کل هزینه‌ها", "توزیع هزینه‌ها", "تراکنش‌های اخیر"]
+    )
+    
+    if analysis_type == "کل هزینه‌ها":
+        df = st.session_state.db.execute("SELECT SUM(amount) AS 'مجموع هزینه‌ها' FROM transactions").fetchdf()
+        st.dataframe(df, hide_index=True)
+        
+    elif analysis_type == "توزیع هزینه‌ها":
+        df = st.session_state.db.execute("""
+        SELECT 
+            category AS 'دسته', 
+            SUM(amount) AS 'مبلغ',
+            ROUND(SUM(amount)*100/(SELECT SUM(amount) FROM transactions), 1) AS 'درصد'
+        FROM transactions 
+        GROUP BY category 
+        ORDER BY SUM(amount) DESC
+        """).fetchdf()
+        st.dataframe(df, hide_index=True)
+        st.bar_chart(df.set_index('دسته')['مبلغ'])
+        
+    elif analysis_type == "تراکنش‌های اخیر":
+        df = st.session_state.db.execute("SELECT * FROM transactions ORDER BY date DESC LIMIT 10").fetchdf()
+        st.dataframe(df, hide_index=True)
 
 with tab3:
     st.header("پرس‌وجوی هوشمند")
